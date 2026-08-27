@@ -1,0 +1,61 @@
+{
+  "name": "@kubohiroya/turbowarp-local-preview",
+  "version": "0.1.0",
+  "description": "Shared local preview primitives for TurboWarp-related development tools.",
+  "author": "Hiroya Kubo <hiroya@cuc.ac.jp>",
+  "license": "MPL-2.0",
+  "homepage": "https://github.com/kubohiroya/turbowarp-local-preview#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kubohiroya/turbowarp-local-preview.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kubohiroya/turbowarp-local-preview/issues"
+  },
+  "keywords": [
+    "turbowarp",
+    "local-preview",
+    "watch",
+    "loopback",
+    "typescript"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist/",
+    "README.md",
+    "README.ja.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "packageManager": "pnpm@11.11.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint src tests",
+    "test": "vitest run",
+    "pack:check": "npm pack --dry-run --ignore-scripts",
+    "check": "pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run build && pnpm run pack:check"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^24.13.3",
+    "eslint": "^9.39.5",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.66.0",
+    "vitest": "^4.1.10"
+  }
+}
