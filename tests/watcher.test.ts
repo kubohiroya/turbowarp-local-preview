@@ -1,4 +1,4 @@
-import {mkdtemp, writeFile} from 'node:fs/promises';
+import {mkdtemp, rename, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {afterEach, describe, expect, it} from 'vitest';
@@ -66,6 +66,64 @@ describe('createStableSourceWatcher', () => {
 
     await watcher.publishNow();
     expect(publications).toEqual(['INITIAL', 'NEXT']);
+  });
+
+  it('recovers when the watched file appears after startup', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'tlp-watcher-'));
+    const sourcePath = 'source.txt';
+    const absolutePath = join(projectRoot, sourcePath);
+
+    const publications: string[] = [];
+    const errors: unknown[] = [];
+    const watcher = createStableSourceWatcher({
+      projectRoot,
+      sourcePath,
+      quietWindowMs: 10,
+      retryIntervalMs: 10,
+      stabilityTimeoutMs: 500,
+      onError: (error) => {
+        errors.push(error);
+      },
+      onPublication: (publication) => {
+        publications.push(publication.parsed);
+      }
+    });
+    watchers.push(watcher);
+
+    watcher.start();
+    await waitFor(() => errors.length > 0);
+    await writeFile(absolutePath, 'created');
+    await waitFor(() => publications.length === 1);
+
+    expect(publications).toEqual(['created']);
+  });
+
+  it('continues after atomic file replacement', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'tlp-watcher-'));
+    const sourcePath = 'source.txt';
+    const absolutePath = join(projectRoot, sourcePath);
+    await writeFile(absolutePath, 'initial');
+
+    const publications: string[] = [];
+    const watcher = createStableSourceWatcher({
+      projectRoot,
+      sourcePath,
+      quietWindowMs: 10,
+      retryIntervalMs: 10,
+      stabilityTimeoutMs: 500,
+      onPublication: (publication) => {
+        publications.push(publication.parsed);
+      }
+    });
+    watchers.push(watcher);
+
+    watcher.start();
+    await waitFor(() => publications.length === 1);
+    await writeFile(`${absolutePath}.tmp`, 'replaced');
+    await rename(`${absolutePath}.tmp`, absolutePath);
+    await waitFor(() => publications.length === 2);
+
+    expect(publications).toEqual(['initial', 'replaced']);
   });
 });
 

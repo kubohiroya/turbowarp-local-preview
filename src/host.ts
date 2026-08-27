@@ -1,6 +1,7 @@
 import {createServer, type IncomingMessage, type Server, type ServerResponse} from 'node:http';
 import {randomBytes, timingSafeEqual} from 'node:crypto';
 import {AddressInfo} from 'node:net';
+import {Readable} from 'node:stream';
 import type {JsonResponse, PreviewEvent, PreviewEventPayload, PreviewRouteHandler} from './types.js';
 
 export interface LoopbackPreviewHostOptions {
@@ -231,10 +232,15 @@ function secureTokenEqual(actual: string | null | undefined, expected: string): 
 
 function toRequest(incoming: IncomingMessage): Request {
   const host = incoming.headers.host ?? '127.0.0.1';
-  return new Request(`http://${host}${incoming.url ?? '/'}`, {
+  const init: RequestInit & {duplex?: 'half'} = {
     method: incoming.method ?? 'GET',
     headers: incoming.headers as HeadersInit
-  });
+  };
+  if (init.method !== 'GET' && init.method !== 'HEAD') {
+    init.body = Readable.toWeb(incoming) as ReadableStream<Uint8Array>;
+    init.duplex = 'half';
+  }
+  return new Request(`http://${host}${incoming.url ?? '/'}`, init);
 }
 
 async function sendRouteResponse(outgoing: ServerResponse, response: JsonResponse | Response): Promise<void> {

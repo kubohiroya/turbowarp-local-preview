@@ -61,6 +61,33 @@ describe('createLoopbackPreviewHost', () => {
       await host.close();
     }
   });
+
+  it('passes request bodies to custom JSON routes', async () => {
+    const host = await createLoopbackPreviewHost({
+      title: 'Preview',
+      token: 'test-token',
+      routes: {
+        '/api/echo': async (request) => ({
+          body: await request.json()
+        })
+      }
+    });
+
+    try {
+      const response = await fetch(new URL('/api/echo', host.url), {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer test-token',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({message: 'hello'})
+      });
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({message: 'hello'});
+    } finally {
+      await host.close();
+    }
+  });
 });
 
 async function readUntil(

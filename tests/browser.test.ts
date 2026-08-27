@@ -10,6 +10,7 @@ describe('validateLoopbackPreviewUrl', () => {
   it('rejects non-loopback URLs', () => {
     expect(() => validateLoopbackPreviewUrl('https://127.0.0.1:4312/?token=abc')).toThrow(/http/);
     expect(() => validateLoopbackPreviewUrl('http://example.com:4312/?token=abc')).toThrow(/loopback/);
+    expect(() => validateLoopbackPreviewUrl('http://localhost:4312/?token=abc')).toThrow(/loopback/);
     expect(() => validateLoopbackPreviewUrl('http://127.0.0.1:4312/')).toThrow(/token/);
   });
 });

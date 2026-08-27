@@ -6,7 +6,7 @@ export function validateLoopbackPreviewUrl(value: string): URL {
   if (url.protocol !== 'http:') {
     throw new Error('Preview URL must use http:');
   }
-  if (!['127.0.0.1', '[::1]', '::1', 'localhost'].includes(url.hostname)) {
+  if (!['127.0.0.1', '[::1]', '::1'].includes(url.hostname)) {
     throw new Error('Preview URL must target a loopback host');
   }
   if (!url.searchParams.get('token')) {

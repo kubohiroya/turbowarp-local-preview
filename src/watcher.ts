@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import {watch, type FSWatcher} from 'node:fs';
 import {readFile} from 'node:fs/promises';
-import {resolve} from 'node:path';
+import {basename, dirname, resolve} from 'node:path';
 import type {Awaitable, Publication} from './types.js';
 
 export interface StableSourceWatcherOptions<TRaw = string, TParsed = TRaw, TSummary = unknown> {
@@ -40,12 +40,15 @@ class NodeStableSourceWatcher<TRaw, TParsed, TSummary> implements StableSourceWa
   #watcher: FSWatcher | undefined;
   #quietTimer: NodeJS.Timeout | undefined;
   #retryTimer: NodeJS.Timeout | undefined;
+  #watchRetryTimer: NodeJS.Timeout | undefined;
   #closed = false;
   #publishing: Promise<void> = Promise.resolve();
   #lastHash: string | undefined;
   #sequence = 0;
 
   readonly #absolutePath: string;
+  readonly #watchDirectory: string;
+  readonly #watchFileName: string;
   readonly #loadSource: (absolutePath: string) => Awaitable<TRaw>;
   readonly #parseSource: (source: TRaw, absolutePath: string) => Awaitable<TParsed>;
   readonly #summarize: (parsed: TParsed, absolutePath: string) => Awaitable<TSummary>;
@@ -58,6 +61,8 @@ class NodeStableSourceWatcher<TRaw, TParsed, TSummary> implements StableSourceWa
   constructor(options: StableSourceWatcherOptions<TRaw, TParsed, TSummary>) {
     this.sourcePath = resolve(options.projectRoot, options.sourcePath);
     this.#absolutePath = this.sourcePath;
+    this.#watchDirectory = dirname(this.#absolutePath);
+    this.#watchFileName = basename(this.#absolutePath);
     this.#loadSource = options.loadSource ?? defaultLoadSource as (absolutePath: string) => Awaitable<TRaw>;
     this.#parseSource = options.parseSource ?? ((source) => source as unknown as TParsed);
     this.#summarize = options.summarize ?? (() => undefined as TSummary);
@@ -73,13 +78,7 @@ class NodeStableSourceWatcher<TRaw, TParsed, TSummary> implements StableSourceWa
       return;
     }
 
-    this.#watcher = watch(this.#absolutePath, {persistent: true}, () => {
-      this.#schedulePublication();
-    });
-    this.#watcher.on('error', (error) => {
-      void this.#reportError(error);
-      this.#scheduleRetry();
-    });
+    this.#openWatcher();
     this.#schedulePublication();
   }
 
@@ -102,9 +101,32 @@ class NodeStableSourceWatcher<TRaw, TParsed, TSummary> implements StableSourceWa
       clearTimeout(this.#retryTimer);
       this.#retryTimer = undefined;
     }
+    if (this.#watchRetryTimer) {
+      clearTimeout(this.#watchRetryTimer);
+      this.#watchRetryTimer = undefined;
+    }
     this.#watcher?.close();
     this.#watcher = undefined;
     await this.#publishing;
+  }
+
+  #openWatcher(): void {
+    try {
+      this.#watcher = watch(this.#watchDirectory, {persistent: true}, (_eventType, fileName) => {
+        if (!fileName || fileName.toString() === this.#watchFileName) {
+          this.#schedulePublication();
+        }
+      });
+      this.#watcher.on('error', (error) => {
+        this.#watcher?.close();
+        this.#watcher = undefined;
+        void this.#reportError(error);
+        this.#scheduleWatchRetry();
+      });
+    } catch (error) {
+      void this.#reportError(error);
+      this.#scheduleWatchRetry();
+    }
   }
 
   #schedulePublication(delayMs = this.#quietWindowMs): void {
@@ -133,6 +155,17 @@ class NodeStableSourceWatcher<TRaw, TParsed, TSummary> implements StableSourceWa
     }
     this.#retryTimer = setTimeout(() => {
       this.#retryTimer = undefined;
+      this.#schedulePublication(0);
+    }, this.#retryIntervalMs);
+  }
+
+  #scheduleWatchRetry(): void {
+    if (this.#closed || this.#watcher || this.#watchRetryTimer) {
+      return;
+    }
+    this.#watchRetryTimer = setTimeout(() => {
+      this.#watchRetryTimer = undefined;
+      this.#openWatcher();
       this.#schedulePublication(0);
     }, this.#retryIntervalMs);
   }
