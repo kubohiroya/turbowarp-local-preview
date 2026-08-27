@@ -18,3 +18,11 @@ export {
   type LoopbackPreviewSnapshot
 } from './host.js';
 export {openLoopbackPreviewBrowser, validateLoopbackPreviewUrl} from './browser.js';
+export {
+  resolveServedBrowserModulePath,
+  resolveServedBrowserVendorModulePath,
+  rewriteServedBrowserModuleSource,
+  type BrowserModulePathOptions,
+  type BrowserModuleSpecifierReplacements,
+  type BrowserVendorModulePathOptions
+} from './browser-module-serving.js';
