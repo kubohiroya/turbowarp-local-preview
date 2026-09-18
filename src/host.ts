@@ -2,6 +2,8 @@ import {createServer, type IncomingMessage, type Server, type ServerResponse} fr
 import {randomBytes, timingSafeEqual} from 'node:crypto';
 import {AddressInfo} from 'node:net';
 import {Readable} from 'node:stream';
+import {pipeline} from 'node:stream/promises';
+import type {ReadableStream as NodeReadableStream} from 'node:stream/web';
 import type {JsonResponse, PreviewEvent, PreviewEventPayload, PreviewRouteHandler} from './types.js';
 
 export interface LoopbackPreviewHostOptions {
@@ -245,11 +247,34 @@ function toRequest(incoming: IncomingMessage): Request {
 
 async function sendRouteResponse(outgoing: ServerResponse, response: JsonResponse | Response): Promise<void> {
   if (response instanceof Response) {
-    outgoing.writeHead(response.status, Object.fromEntries(response.headers.entries()));
-    outgoing.end(Buffer.from(await response.arrayBuffer()));
+    await sendWebResponse(outgoing, response);
     return;
   }
   sendJson(outgoing, response.status ?? 200, response.body ?? {}, response.headers);
+}
+
+async function sendWebResponse(outgoing: ServerResponse, response: Response): Promise<void> {
+  outgoing.writeHead(response.status, Object.fromEntries(response.headers.entries()));
+  if (!response.body) {
+    outgoing.end();
+    return;
+  }
+  // Stream the body instead of buffering it, so large route responses (e.g. recordings)
+  // reach the client incrementally. pipeline() cancels the source stream when the client
+  // disconnects and destroys the response when the source stream errors.
+  try {
+    await pipeline(Readable.fromWeb(response.body as NodeReadableStream<Uint8Array>), outgoing);
+  } catch (error) {
+    if (isPrematureClose(error)) {
+      // The client went away mid-stream; the source has already been cancelled.
+      return;
+    }
+    throw error;
+  }
+}
+
+function isPrematureClose(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | undefined)?.code === 'ERR_STREAM_PREMATURE_CLOSE';
 }
 
 function sendJson(outgoing: ServerResponse, status: number, body: unknown, headers?: HeadersInit): void {
