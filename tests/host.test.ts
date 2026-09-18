@@ -88,7 +88,199 @@ describe('createLoopbackPreviewHost', () => {
       await host.close();
     }
   });
+
+  it('streams route Response bodies incrementally instead of buffering them', async () => {
+    const chunkSize = 64 * 1024;
+    const chunkCount = 128;
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    let closed = false;
+    const host = await createLoopbackPreviewHost({
+      title: 'Preview',
+      token: 'test-token',
+      routes: {
+        '/api/recording': () => new Response(new ReadableStream<Uint8Array>({
+          start(streamController) {
+            controller = streamController;
+            controller.enqueue(new Uint8Array(chunkSize).fill(1));
+          }
+        }), {
+          headers: {'Content-Type': 'application/octet-stream'}
+        })
+      }
+    });
+
+    try {
+      const response = await fetch(new URL('/api/recording', host.url), {
+        headers: {Authorization: 'Bearer test-token'}
+      });
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toBe('application/octet-stream');
+      const reader = response.body!.getReader();
+
+      const first = await reader.read();
+      expect(first.done).toBe(false);
+      expect(first.value!.byteLength).toBeGreaterThan(0);
+      expect(closed).toBe(false);
+
+      let received = first.value!.byteLength;
+      for (let index = 1; index < chunkCount; index++) {
+        controller.enqueue(new Uint8Array(chunkSize).fill(1));
+      }
+      controller.close();
+      closed = true;
+
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) {
+          break;
+        }
+        received += chunk.value.byteLength;
+      }
+      expect(received).toBe(chunkSize * chunkCount);
+    } finally {
+      await host.close();
+    }
+  });
+
+  it('ends route Responses that have a null body', async () => {
+    const host = await createLoopbackPreviewHost({
+      title: 'Preview',
+      token: 'test-token',
+      routes: {
+        '/api/empty': () => new Response(null, {status: 200, headers: {'X-Empty': 'yes'}}),
+        '/api/no-content': () => new Response(null, {status: 204})
+      }
+    });
+
+    try {
+      const empty = await fetch(new URL('/api/empty', host.url), {
+        headers: {Authorization: 'Bearer test-token'}
+      });
+      expect(empty.status).toBe(200);
+      expect(empty.headers.get('x-empty')).toBe('yes');
+      await expect(empty.text()).resolves.toBe('');
+
+      const noContent = await fetch(new URL('/api/no-content', host.url), {
+        headers: {Authorization: 'Bearer test-token'}
+      });
+      expect(noContent.status).toBe(204);
+      await expect(noContent.text()).resolves.toBe('');
+    } finally {
+      await host.close();
+    }
+  });
+
+  it('cancels the route body stream when the client disconnects', async () => {
+    const errors: unknown[] = [];
+    let resolveCancelled!: (reason: unknown) => void;
+    const cancelled = new Promise<unknown>((resolve) => {
+      resolveCancelled = resolve;
+    });
+    const host = await createLoopbackPreviewHost({
+      title: 'Preview',
+      token: 'test-token',
+      onError: (error) => {
+        errors.push(error);
+      },
+      routes: {
+        '/api/recording': () => new Response(new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array(1024).fill(1));
+          },
+          cancel(reason) {
+            resolveCancelled(reason);
+          }
+        }))
+      }
+    });
+
+    try {
+      const abort = new AbortController();
+      const response = await fetch(new URL('/api/recording', host.url), {
+        headers: {Authorization: 'Bearer test-token'},
+        signal: abort.signal
+      });
+      const reader = response.body!.getReader();
+      const first = await reader.read();
+      expect(first.done).toBe(false);
+      abort.abort();
+
+      await withTimeout(cancelled, 2_000, 'source stream was not cancelled');
+
+      const lifecycle = await fetch(new URL('/api/lifecycle', host.url), {
+        headers: {Authorization: 'Bearer test-token'}
+      });
+      expect(lifecycle.status).toBe(200);
+      expect(errors).toEqual([]);
+    } finally {
+      await host.close();
+    }
+  });
+
+  it('aborts the response and reports the error when the route body stream fails', async () => {
+    const errors: unknown[] = [];
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const host = await createLoopbackPreviewHost({
+      title: 'Preview',
+      token: 'test-token',
+      onError: (error) => {
+        errors.push(error);
+      },
+      routes: {
+        '/api/recording': () => new Response(new ReadableStream<Uint8Array>({
+          start(streamController) {
+            controller = streamController;
+            controller.enqueue(new Uint8Array(1024).fill(1));
+          }
+        }))
+      }
+    });
+
+    try {
+      const response = await fetch(new URL('/api/recording', host.url), {
+        headers: {Authorization: 'Bearer test-token'}
+      });
+      const reader = response.body!.getReader();
+      const first = await reader.read();
+      expect(first.done).toBe(false);
+
+      controller.error(new Error('disk read failed'));
+      await expect(readToEnd(reader)).rejects.toThrow();
+      expect(errors).toHaveLength(1);
+      expect((errors[0] as Error).message).toBe('disk read failed');
+
+      const lifecycle = await fetch(new URL('/api/lifecycle', host.url), {
+        headers: {Authorization: 'Bearer test-token'}
+      });
+      expect(lifecycle.status).toBe(200);
+    } finally {
+      await host.close();
+    }
+  });
 });
+
+async function readToEnd(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<void> {
+  for (;;) {
+    const chunk = await reader.read();
+    if (chunk.done) {
+      return;
+    }
+  }
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), ms);
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 async function readUntil(
   reader: ReadableStreamDefaultReader<Uint8Array> | undefined,

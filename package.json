@@ -1,6 +1,6 @@
 {
   "name": "@kubohiroya/turbowarp-local-preview",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Shared local preview primitives for TurboWarp-related development tools.",
   "author": "Hiroya Kubo <hiroya@cuc.ac.jp>",
   "license": "MPL-2.0",
