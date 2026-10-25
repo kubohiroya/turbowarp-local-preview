@@ -1,5 +1,7 @@
 # turbowarp-local-preview
 
+[English](README.md) | 日本語
+
 TurboWarp 関連の開発ツールで共有するローカルプレビュー基盤です。
 
 このパッケージはファイル形式に依存しません。DSL4、SB3、A-Frame YAML などの形式固有処理は利用側の adapter として実装します。

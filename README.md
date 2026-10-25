@@ -1,5 +1,7 @@
 # turbowarp-local-preview
 
+English | [日本語](README.ja.md)
+
 Shared local preview primitives for TurboWarp-related development tools.
 
 This package intentionally stays format-agnostic. DSL4, SB3, A-Frame YAML, and other source-specific parsing remain in caller-provided adapters.
